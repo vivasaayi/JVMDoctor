@@ -107,11 +107,12 @@ public class Agent {
 
             // Start metrics push thread to central backend
             String centralUrl = System.getenv("CENTRAL_BACKEND_URL");
+            final int metricsPort = port; // Make it final for lambda
             if (centralUrl != null && !centralUrl.isEmpty()) {
                 Thread pushThread = new Thread(() -> {
                     while (true) {
                         try {
-                            pushMetricsToCentral(centralUrl, port);
+                            pushMetricsToCentral(centralUrl, metricsPort);
                             Thread.sleep(5000); // Push every 5 seconds
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();

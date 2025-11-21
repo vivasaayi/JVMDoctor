@@ -43,7 +43,7 @@ public class ProcessManager {
         }
     }
 
-    public static ManagedProcess startProcess(String jarPath, int agentPort, List<String> extraArgs, String agentJar) throws IOException {
+    public static ManagedProcess startProcess(String jarPath, int agentPort, List<String> extraArgs, String agentJar, Map<String, String> envVars) throws IOException {
         if (processes.size() >= MAX_PROCESSES) {
             throw new IOException("max processes reached");
         }
@@ -82,6 +82,9 @@ public class ProcessManager {
 
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.redirectErrorStream(true);
+        if (envVars != null) {
+            pb.environment().putAll(envVars);
+        }
         Process p = pb.start();
 
         ManagedProcess mp = new ManagedProcess(id, p, agentPort, jarPath, cmd);

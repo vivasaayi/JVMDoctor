@@ -8,6 +8,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -18,11 +19,14 @@ import javax.management.remote.JMXConnector;
 import javax.management.remote.JMXConnectorFactory;
 import javax.management.remote.JMXServiceURL;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @RestController
 @RequestMapping("/api/processes")
 public class ProcessController {
     private final HttpClient client = HttpClient.newHttpClient();
+    private static final Pattern HISTOGRAM_LINE = Pattern.compile("^(\\d+):\\s+(\\d+)\\s+(\\d+)\\s+(.+)$");
 
     @CrossOrigin(origins = "*")
     @PostMapping("/start")
@@ -41,12 +45,15 @@ public class ProcessController {
         }
         String agentJar = (String) cfg.get("agentJar");
         List<String> args = cfg.containsKey("args") ? (List<String>) cfg.get("args") : List.of();
+        @SuppressWarnings("unchecked")
+        List<Map<String, String>> envVarsList = cfg.containsKey("envVars") ? (List<Map<String, String>>) cfg.get("envVars") : List.of();
+        Map<String, String> envVars = envVarsList.stream().collect(Collectors.toMap(m -> m.get("key"), m -> m.get("value")));
 
         if (jarPath == null) return ResponseEntity.badRequest().body(Map.of("error", "jarPath is required"));
 
         try {
             
-            var mp = ProcessManager.startProcess(jarPath, agentPort, args, agentJar);
+            var mp = ProcessManager.startProcess(jarPath, agentPort, args, agentJar, envVars);
             return ResponseEntity.created(URI.create("/api/processes/" + mp.id)).body(Map.of("id", mp.id));
         } catch (IOException e) {
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
@@ -215,6 +222,21 @@ public class ProcessController {
         }
     }
 
+    @GetMapping("/{id}/heap/histogram")
+    public ResponseEntity<?> heapHistogram(@PathVariable("id") long id,
+                                           @RequestParam(value = "limit", required = false, defaultValue = "25") int limit) {
+        var list = ProcessManager.listProcesses().stream().filter(mp -> mp.id == id).collect(Collectors.toList());
+        if (list.isEmpty()) return ResponseEntity.notFound().build();
+        var mp = list.get(0);
+        int maxRows = Math.max(1, Math.min(200, limit));
+        try {
+            List<Map<String,Object>> rows = collectHeapHistogram(mp.pid, maxRows);
+            return ResponseEntity.ok(Map.of("entries", rows));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
     @PostMapping("/{id}/gc/log")
     public ResponseEntity<?> gcLog(@PathVariable("id") long id, @RequestBody Map<String,Object> cfg) {
         var list = ProcessManager.listProcesses().stream().filter(mp -> mp.id == id).collect(Collectors.toList());
@@ -330,7 +352,58 @@ public class ProcessController {
         }
     }
 
+    private List<Map<String,Object>> collectHeapHistogram(long pid, int maxRows) throws Exception {
+        VirtualMachine vm = null;
+        JMXConnector conn = null;
+        try {
+            vm = VirtualMachine.attach(String.valueOf(pid));
+            vm.startLocalManagementAgent();
+            String connectorAddress = vm.getAgentProperties().getProperty("com.sun.management.jmxremote.localConnectorAddress");
+            if (connectorAddress == null) {
+                throw new IOException("Management agent unavailable for pid " + pid);
+            }
+            JMXServiceURL url = new JMXServiceURL(connectorAddress);
+            conn = JMXConnectorFactory.connect(url);
+            MBeanServerConnection mbsc = conn.getMBeanServerConnection();
+            ObjectName diag = new ObjectName("com.sun.management:type=DiagnosticCommand");
+            String[] signature = new String[]{String[].class.getName()};
+            Object[] params = new Object[]{new String[0]};
+            String histogram = (String) mbsc.invoke(diag, "gcClassHistogram", params, signature);
+            return parseHistogramText(histogram, maxRows);
+        } finally {
+            if (conn != null) {
+                try { conn.close(); } catch (Exception ignore) {}
+            }
+            if (vm != null) {
+                try { vm.detach(); } catch (Exception ignore) {}
+            }
+        }
+    }
 
+    private List<Map<String,Object>> parseHistogramText(String histogram, int maxRows) {
+        List<Map<String,Object>> rows = new ArrayList<>();
+        if (histogram == null) {
+            return rows;
+        }
+        String[] lines = histogram.split("\\r?\\n");
+        for (String raw : lines) {
+            String line = raw.trim();
+            Matcher matcher = HISTOGRAM_LINE.matcher(line);
+            if (!matcher.matches()) {
+                continue;
+            }
+            rows.add(Map.of(
+                "rank", Integer.parseInt(matcher.group(1)),
+                "instances", Long.parseLong(matcher.group(2)),
+                "bytes", Long.parseLong(matcher.group(3)),
+                "className", matcher.group(4)
+            ));
+            if (rows.size() >= maxRows) {
+                break;
+            }
+        }
+        return rows;
+    }
 }
 
 
