@@ -21,6 +21,8 @@ import javax.management.remote.JMXServiceURL;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -31,12 +33,14 @@ import org.springframework.http.HttpHeaders;
 @RestController
 @RequestMapping("/api/processes")
 public class ProcessController {
+    private static final Logger logger = LoggerFactory.getLogger(ProcessController.class);
     private final HttpClient client = HttpClient.newHttpClient();
     private static final Pattern HISTOGRAM_LINE = Pattern.compile("^(\\d+):\\s+(\\d+)\\s+(\\d+)\\s+(.+)$");
 
     @CrossOrigin(origins = "*")
     @PostMapping("/start")
     public ResponseEntity<?> start(@RequestBody Map<String, Object> cfg) {
+        logger.info("Starting new managed process");
         String jarPath = (String) cfg.get("jarPath");
         int agentPort = 9404;
         if (cfg.containsKey("agentPort")) {
@@ -55,13 +59,19 @@ public class ProcessController {
         List<Map<String, String>> envVarsList = cfg.containsKey("envVars") ? (List<Map<String, String>>) cfg.get("envVars") : List.of();
         Map<String, String> envVars = envVarsList.stream().collect(Collectors.toMap(m -> m.get("key"), m -> m.get("value")));
 
-        if (jarPath == null) return ResponseEntity.badRequest().body(Map.of("error", "jarPath is required"));
+        if (jarPath == null) {
+            logger.warn("jarPath not provided in start request");
+            return ResponseEntity.badRequest().body(Map.of("error", "jarPath is required"));
+        }
+        logger.info("Starting process: jar={}, agentPort={}, agentJar={}, args={}, envVars={}", jarPath, agentPort, agentJar, args, envVars.keySet());
 
         try {
             
             var mp = ProcessManager.startProcess(jarPath, agentPort, args, agentJar, envVars);
+            logger.info("Process started successfully: id={}, pid={}", mp.id, mp.pid);
             return ResponseEntity.created(URI.create("/api/processes/" + mp.id)).body(Map.of("id", mp.id));
         } catch (IOException e) {
+            logger.error("Failed to start process: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }
     }
@@ -85,16 +95,23 @@ public class ProcessController {
 
     @GetMapping("/{id}/metrics")
     public ResponseEntity<?> metrics(@PathVariable("id") long id) {
+        logger.debug("Metrics requested for process id: {}", id);
         var list = ProcessManager.listProcesses().stream().filter(mp -> mp.id == id).collect(Collectors.toList());
-        if (list.isEmpty()) return ResponseEntity.notFound().build();
+        if (list.isEmpty()) {
+            logger.warn("Process with id {} not found for metrics", id);
+            return ResponseEntity.notFound().build();
+        }
         var mp = list.get(0);
 
         String url = "http://localhost:" + mp.port + "/metrics";
+        logger.debug("Fetching metrics from agent at: {}", url);
         try {
             HttpRequest r = HttpRequest.newBuilder(URI.create(url)).GET().build();
             HttpResponse<String> resp = client.send(r, HttpResponse.BodyHandlers.ofString());
+            logger.debug("Metrics response status: {}, length: {}", resp.statusCode(), resp.body().length());
             return ResponseEntity.ok(resp.body());
         } catch (Exception e) {
+            logger.error("Failed to fetch metrics for process {} from {}: {}", id, url, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }
     }
@@ -207,54 +224,72 @@ public class ProcessController {
 
     @PostMapping("/{id}/heapdump")
     public ResponseEntity<?> heapDump(@PathVariable("id") long id, @RequestBody Map<String,Object> cfg) {
+        logger.info("Heap dump requested for process id: {}", id);
         var list = ProcessManager.listProcesses().stream().filter(mp -> mp.id == id).collect(Collectors.toList());
-        if (list.isEmpty()) return ResponseEntity.notFound().build();
+        if (list.isEmpty()) {
+            logger.warn("Process with id {} not found", id);
+            return ResponseEntity.notFound().build();
+        }
         var mp = list.get(0);
         String target = cfg.containsKey("filename") ? (String) cfg.get("filename") : "/tmp/heapdump-"+mp.pid+".hprof";
+        logger.info("Target heap dump file: {}", target);
         try {
+            logger.debug("Attempting to attach to JVM with PID: {}", mp.pid);
             VirtualMachine vm = VirtualMachine.attach(String.valueOf(mp.pid));
             vm.startLocalManagementAgent();
             String connectorAddress = vm.getAgentProperties().getProperty("com.sun.management.jmxremote.localConnectorAddress");
+            logger.debug("JMX connector address: {}", connectorAddress);
             JMXServiceURL url = new JMXServiceURL(connectorAddress);
             JMXConnector conn = JMXConnectorFactory.connect(url);
             MBeanServerConnection mbsc = conn.getMBeanServerConnection();
             ObjectName name = new ObjectName("com.jvmdoctor:type=AgentControl");
+            logger.debug("Invoking takeHeapDump on agent");
             String returned = (String) mbsc.invoke(name, "takeHeapDump", new Object[]{target, Boolean.TRUE}, new String[]{"java.lang.String","boolean"});
+            logger.info("Agent returned heap dump path: {}", returned);
             conn.close();
             vm.detach();
             Path path = Paths.get(returned);
             if (Files.exists(path)) {
+                logger.info("Heap dump file verified to exist: {}", returned);
                 return ResponseEntity.ok(Map.of("status", "success", "path", returned));
             } else {
+                logger.error("Heap dump file not found after creation: {}", returned);
                 return ResponseEntity.status(500).body(Map.of("status", "error", "message", "Heap dump file was not created"));
             }
         } catch (com.sun.tools.attach.AttachNotSupportedException e) {
+            logger.error("Attach not supported for PID {}: {}", mp.pid, e.getMessage());
             // Attach is not supported for this pid — explain why and give guidance.
             String msg = e.getMessage() == null ? "attach not supported" : e.getMessage();
             String suggestion = "The target JVM doesn't allow attach from this process. Ensure you run JVMDoctor as the same user as the target process, or restart the target process with a management agent or debug options (e.g. enable JMX or run with tools that allow dynamic attach).";
             return ResponseEntity.status(412).body(Map.of("error", msg, "hint", suggestion, "pid", mp.pid));
         } catch (IllegalStateException e) {
+            logger.error("Attach handshake failed for PID {}: {}", mp.pid, e.getMessage());
             // common attach-handshake errors like "state is not ready to participate..."
             String msg = e.getMessage();
             String suggestion = "Attach handshake failed — the target JVM may be starting up or disallowing attach. Try again after the target process is fully started, or launch the process under JVMDoctor as a managed process so attach works.";
             return ResponseEntity.status(409).body(Map.of("error", msg, "hint", suggestion, "pid", mp.pid));
         } catch (Exception e) {
+            logger.error("Unexpected error during heap dump for PID {}: {}", mp.pid, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }
     }
 
     @GetMapping("/{id}/heap/download")
     public ResponseEntity<?> downloadHeapDump(@PathVariable("id") long id, @RequestParam("path") String path) {
+        logger.info("Heap dump download requested for process id: {}, path: {}", id, path);
         try {
             Path filePath = Paths.get(path);
             if (!Files.exists(filePath)) {
+                logger.warn("Heap dump file not found: {}", path);
                 return ResponseEntity.notFound().build();
             }
+            logger.info("Serving heap dump file: {}", path);
             Resource resource = new FileSystemResource(filePath);
             return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filePath.getFileName() + "\"")
                 .body(resource);
         } catch (Exception e) {
+            logger.error("Error serving heap dump file {}: {}", path, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }
     }
@@ -262,22 +297,31 @@ public class ProcessController {
     @GetMapping("/{id}/heap/histogram")
     public ResponseEntity<?> heapHistogram(@PathVariable("id") long id,
                                            @RequestParam(value = "limit", required = false, defaultValue = "25") int limit) {
+        logger.info("Heap histogram requested for process id: {}, limit: {}", id, limit);
         var list = ProcessManager.listProcesses().stream().filter(mp -> mp.id == id).collect(Collectors.toList());
-        if (list.isEmpty()) return ResponseEntity.notFound().build();
+        if (list.isEmpty()) {
+            logger.warn("Process with id {} not found", id);
+            return ResponseEntity.notFound().build();
+        }
         var mp = list.get(0);
         int maxRows = Math.max(1, Math.min(200, limit));
+        logger.debug("Max rows for histogram: {}", maxRows);
         try {
             List<Map<String,Object>> rows = collectHeapHistogram(mp.pid, maxRows);
+            logger.info("Heap histogram collected {} entries for PID {}", rows.size(), mp.pid);
             return ResponseEntity.ok(Map.of("entries", rows));
         } catch (com.sun.tools.attach.AttachNotSupportedException e) {
+            logger.error("Attach not supported for PID {}: {}", mp.pid, e.getMessage());
             String msg = e.getMessage() == null ? "attach not supported" : e.getMessage();
             String hint = "Attach not supported; run JVMDoctor as same user as target process, or use managed launch.";
             return ResponseEntity.status(412).body(Map.of("error", msg, "hint", hint, "pid", mp.pid));
         } catch (IllegalStateException e) {
+            logger.error("Attach handshake failed for PID {}: {}", mp.pid, e.getMessage());
             String msg = e.getMessage();
             String hint = "Target is not ready for attach; retry after it fully starts or use managed launch.";
             return ResponseEntity.status(409).body(Map.of("error", msg, "hint", hint, "pid", mp.pid));
         } catch (Exception e) {
+            logger.error("Unexpected error during heap histogram for PID {}: {}", mp.pid, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }
     }
@@ -326,15 +370,22 @@ public class ProcessController {
 
     @PostMapping("/jvms/{pid}/attach")
     public ResponseEntity<?> attachAgentToJvm(@PathVariable("pid") String pid, @RequestBody Map<String,Object> cfg) {
+        logger.info("Attaching agent to JVM PID: {}", pid);
         String agentJar = (String) cfg.get("agentJar");
         String agentArgs = cfg.containsKey("agentArgs") ? (String) cfg.get("agentArgs") : null;
-        if (agentJar == null) return ResponseEntity.badRequest().body(Map.of("error","agentJar required"));
+        if (agentJar == null) {
+            logger.warn("Agent jar not provided for PID {}", pid);
+            return ResponseEntity.badRequest().body(Map.of("error","agentJar required"));
+        }
+        logger.debug("Agent jar: {}, args: {}", agentJar, agentArgs);
         try {
             VirtualMachine vm = VirtualMachine.attach(pid);
             vm.loadAgent(agentJar, agentArgs == null ? "" : agentArgs);
             vm.detach();
+            logger.info("Agent attached successfully to PID {}", pid);
             return ResponseEntity.ok(Map.of("attached", true));
         } catch (Exception e) {
+            logger.error("Failed to attach agent to PID {}: {}", pid, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }
     }
@@ -398,6 +449,7 @@ public class ProcessController {
     }
 
     private List<Map<String,Object>> collectHeapHistogram(long pid, int maxRows) throws Exception {
+        logger.debug("Collecting heap histogram for PID: {}, maxRows: {}", pid, maxRows);
         VirtualMachine vm = null;
         JMXConnector conn = null;
         try {
@@ -405,22 +457,26 @@ public class ProcessController {
             vm.startLocalManagementAgent();
             String connectorAddress = vm.getAgentProperties().getProperty("com.sun.management.jmxremote.localConnectorAddress");
             if (connectorAddress == null) {
+                logger.error("Management agent unavailable for PID {}", pid);
                 throw new IOException("Management agent unavailable for pid " + pid);
             }
+            logger.debug("JMX connector address for histogram: {}", connectorAddress);
             JMXServiceURL url = new JMXServiceURL(connectorAddress);
             conn = JMXConnectorFactory.connect(url);
             MBeanServerConnection mbsc = conn.getMBeanServerConnection();
             ObjectName diag = new ObjectName("com.sun.management:type=DiagnosticCommand");
             String[] signature = new String[]{String[].class.getName()};
             Object[] params = new Object[]{new String[0]};
+            logger.debug("Invoking gcClassHistogram for PID {}", pid);
             String histogram = (String) mbsc.invoke(diag, "gcClassHistogram", params, signature);
+            logger.debug("Histogram data length: {}", histogram != null ? histogram.length() : 0);
             return parseHistogramText(histogram, maxRows);
         } finally {
             if (conn != null) {
-                try { conn.close(); } catch (Exception ignore) {}
+                try { conn.close(); logger.debug("JMX connection closed for PID {}", pid); } catch (Exception ignore) {}
             }
             if (vm != null) {
-                try { vm.detach(); } catch (Exception ignore) {}
+                try { vm.detach(); logger.debug("Detached from VM PID {}", pid); } catch (Exception ignore) {}
             }
         }
     }
