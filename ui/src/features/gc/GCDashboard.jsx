@@ -6,6 +6,8 @@ const palette = ['#39f', '#f86c6b', '#20c997', '#ffa600', '#6f42c1']
 
 export default function GCDashboard({ metricsSample }) {
   const [series, setSeries] = useState({})
+  // previous cumulative totals per collector — used to compute deltas (time spent per interval)
+  const prevTotals = React.useRef({})
 
   useEffect(() => {
     if (!metricsSample) {
@@ -23,8 +25,12 @@ export default function GCDashboard({ metricsSample }) {
       const next = { ...prev }
       entries.forEach((entry) => {
         const key = entry.labels.gc || entry.labels.name || 'gc'
+        const prevVal = prevTotals.current[key]
+        const delta = prevVal != null ? Math.max(0, entry.value - prevVal) : 0
+        prevTotals.current[key] = entry.value
+        const valueForChart = delta // show delta of seconds in the interval
         const existing = next[key] ? [...next[key]] : []
-        existing.push({ x: metricsSample.timestamp, y: entry.value })
+        existing.push({ x: metricsSample.timestamp, y: valueForChart })
         next[key] = existing.slice(-180)
       })
       return next

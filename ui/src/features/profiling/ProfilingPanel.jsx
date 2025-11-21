@@ -38,7 +38,22 @@ export default function ProfilingPanel({ selectedProcess, notify }) {
         setProfilePath(result.path)
       }
     } catch (err) {
-      notify('danger', `Profiler failed: ${err.message}`)
+      // If backend returns a helpful JSON error, parse it and show hint
+      let message = err.message || String(err)
+      try {
+        const parsed = typeof message === 'string' ? JSON.parse(message) : message
+        if (parsed && parsed.error) {
+          message = parsed.error
+          if (parsed.hint) message += ` — ${parsed.hint}`
+        }
+      } catch (e) {
+        // not JSON — use original message
+      }
+      if (message && message.toLowerCase().includes('async-profiler')) {
+        notify('danger', `Profiler not available: ${message}. Install async-profiler and set ASYNC_PROFILER_HOME environment variable for the backend process. See README for installation steps.`)
+      } else {
+        notify('danger', `Profiler failed: ${message}`)
+      }
     } finally {
       setPending(false)
     }

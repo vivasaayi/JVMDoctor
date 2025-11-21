@@ -161,7 +161,18 @@ function HeapDumpPanel({ selectedProcess, notify }) {
       setLastDump(response.path)
       notify('success', `Heap dump created at ${response.path}`)
     } catch (err) {
-      notify('danger', `Heap dump failed: ${err.message}`)
+      // backend often returns JSON with error/hint fields — try to parse and show helpful hint
+      let message = err.message || String(err)
+      try {
+        const parsed = typeof message === 'string' ? JSON.parse(message) : message
+        if (parsed && parsed.error) {
+          let hint = parsed.hint ? ` — ${parsed.hint}` : ''
+          message = `${parsed.error}${hint}`
+        }
+      } catch (e) {
+        // not JSON — show raw message
+      }
+      notify('danger', `Heap dump failed: ${message}`)
     } finally {
       setPending(false)
     }

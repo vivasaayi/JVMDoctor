@@ -217,6 +217,16 @@ public class ProcessController {
             conn.close();
             vm.detach();
             return ResponseEntity.ok(Map.of("path", returned));
+        } catch (com.sun.tools.attach.AttachNotSupportedException e) {
+            // Attach is not supported for this pid — explain why and give guidance.
+            String msg = e.getMessage() == null ? "attach not supported" : e.getMessage();
+            String suggestion = "The target JVM doesn't allow attach from this process. Ensure you run JVMDoctor as the same user as the target process, or restart the target process with a management agent or debug options (e.g. enable JMX or run with tools that allow dynamic attach).";
+            return ResponseEntity.status(412).body(Map.of("error", msg, "hint", suggestion, "pid", mp.pid));
+        } catch (IllegalStateException e) {
+            // common attach-handshake errors like "state is not ready to participate..."
+            String msg = e.getMessage();
+            String suggestion = "Attach handshake failed — the target JVM may be starting up or disallowing attach. Try again after the target process is fully started, or launch the process under JVMDoctor as a managed process so attach works.";
+            return ResponseEntity.status(409).body(Map.of("error", msg, "hint", suggestion, "pid", mp.pid));
         } catch (Exception e) {
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }
