@@ -1,7 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react'
 import Chart from 'chart.js/auto'
 import 'chartjs-adapter-date-fns'
-import { Container, Grid, Paper, Typography, TextField, Button, Checkbox, FormControlLabel, MenuItem, Select } from '@mui/material'
+import {
+  CContainer,
+  CRow,
+  CCol,
+  CCard,
+  CCardBody,
+  CCardHeader,
+  CButton,
+  CFormInput,
+  CListGroup,
+  CListGroupItem,
+  CAlert
+} from '@coreui/react'
 
 export default function App(){
   const [processes, setProcesses] = useState([])
@@ -9,12 +21,11 @@ export default function App(){
   const [selected, setSelected] = useState(null)
   const [jfrPath, setJfrPath] = useState(null)
   const [profilePath, setProfilePath] = useState(null)
-    const chartRef = useRef(null)
+  const chartRef = useRef(null)
   const chartInstance = useRef(null)
   const dataPoints = useRef([])
 
   useEffect(() => { refresh() }, [])
-
   useEffect(() => {
     let handle = null
     if (selected) {
@@ -43,7 +54,6 @@ export default function App(){
     if (!selected) return
     const resp = await fetch('/api/processes/' + selected + '/metrics')
     const text = await resp.text()
-    // parse prometheus metrics
     const lines = text.split('\n')
     for(const line of lines){
       if(line.startsWith('jvmdoctor_thread_count')){
@@ -82,14 +92,12 @@ export default function App(){
   }
 
   function openLogs(id){
-    // open SSE
     const sse = new EventSource('/api/processes/' + id + '/logs/stream')
     sse.onmessage = (e) => {
       const el = document.getElementById('log')
       el.innerText += e.data + '\n'
       el.scrollTop = el.scrollHeight
     }
-    // load existing logs
     fetchLogs(id)
   }
 
@@ -115,7 +123,6 @@ export default function App(){
     else {
       alert('JFR dumped to ' + data.path)
       setJfrPath(data.path)
-      // add file link
       const a = document.createElement('a')
       a.href = '/api/files/download?path=' + encodeURIComponent(data.path)
       a.innerText = 'Download JFR'
@@ -143,93 +150,54 @@ export default function App(){
     }
   }
 
-  return (<Container sx={{paddingTop:4}}>
-    <h1>JVMDoctor React UI</h1>
+  return (
+    <CContainer className="pt-4">
+      <h1>JVMDoctor React UI (CoreUI)</h1>
 
-    <Paper sx={{p:2, mb:2}}>
-      <Typography variant='h6'>Launch a JAR</Typography>
-      <Grid container spacing={2} alignItems='center'>
-        <Grid item xs={12}><TextField id='jarPath' label='Jar Path' defaultValue='sample-app/target/sample-app-0.1.0-SNAPSHOT-jar-with-dependencies.jar' fullWidth/></Grid>
-        <Grid item xs={12}><TextField id='agentJar' label='Agent JAR' defaultValue='agent/target/agent-0.1.0-SNAPSHOT.jar' fullWidth/></Grid>
-        <Grid item xs={6}><TextField id='agentPort' label='Agent Port' defaultValue='9404' fullWidth/></Grid>
-        <Grid item xs={6}><TextField id='jvmArgs' label='JVM Args' defaultValue='-Xmx256m' fullWidth/></Grid>
-        <Grid item><Button variant='contained' onClick={startJar}>Start</Button></Grid>
-      </Grid>
-    </Paper>
+      <CCard className="mb-3">
+        <CCardHeader>Launch a JAR</CCardHeader>
+        <CCardBody>
+          <CRow>
+            <CCol xs={8}><CFormInput id="jarPath" placeholder="Path to your JAR" defaultValue='sample-app/target/sample-app-0.1.0-SNAPSHOT-jar-with-dependencies.jar' /></CCol>
+            <CCol xs={4}><CFormInput id="agentJar" placeholder="Agent JAR" defaultValue='agent/target/agent-0.1.0-SNAPSHOT.jar' /></CCol>
+            <CCol xs={6}><CFormInput id="agentPort" placeholder="Agent Port" defaultValue='9404'/></CCol>
+            <CCol xs={6}><CFormInput id="jvmArgs" placeholder="JVM Args" defaultValue='-Xmx256m'/></CCol>
+            <CCol xs={12}><CButton color="primary" onClick={startJar}>Start JAR</CButton></CCol>
+          </CRow>
+        </CCardBody>
+      </CCard>
 
-    <h2>Running processes</h2>
-    <div>
-      <Button variant='outlined' onClick={refresh}>Refresh</Button>
-      <ul>
-        {processes.map(p => <li key={p.id}>{p.jar} - port:{p.port}
-          <Button onClick={()=>{setSelected(p.id)}}>Select</Button>
-          <Button onClick={()=>openLogs(p.id)}>Logs</Button>
-          <Button onClick={()=>toggle(p.id, true)}>Enable sample</Button>
-          <Button onClick={()=>toggle(p.id, false)}>Disable sample</Button>
-          <Button onClick={async () => {
-              const resp = await fetch('/api/processes/' + p.id + '/history');
-              const body = await resp.json();
-              alert(JSON.stringify(body, null, 2));
-            }}>History</Button>
-        </li>)}
-      </ul>
-    </div>
+      <CRow>
+        <CCol xs={3}>
+          <CCard>
+            <CCardHeader>Processes</CCardHeader>
+            <CCardBody>
+              <CListGroup>
+                {processes.map(p => (
+                  <CListGroupItem key={p.id} action onClick={() => setSelected(p.id)}>
+                    {p.jar} <small className="text-muted">(pid:{p.port})</small>
+                    <CButton size='sm' color='secondary' style={{float:'right'}} onClick={(e)=>{e.stopPropagation(); attachAgent(p.id)}}>Attach</CButton>
+                  </CListGroupItem>
+                ))}
+              </CListGroup>
+            </CCardBody>
+          </CCard>
+        </CCol>
+        <CCol xs={9}>
+          <CCard>
+            <CCardHeader>Metrics</CCardHeader>
+            <CCardBody>
+              <canvas ref={chartRef} />
+              {selected ? <div>Selected: {selected}</div> : <CAlert color="info">Select a process to show metrics</CAlert>}
+            </CCardBody>
+          </CCard>
+        </CCol>
+      </CRow>
 
-    <h2>Local JVMs (attach)</h2>
-    <div>
-      <TextField id='agentJarAttach' defaultValue='agent/target/agent-0.1.0-SNAPSHOT.jar' sx={{width:'60%'}}/>
-      <ul>
-        {jvms.map(j => <li key={j.id}>{j.id} - {j.displayName} <button onClick={()=>attachAgent(j.id)}>Attach agent</button></li>)}
-      </ul>
-    </div>
-
-    <Paper sx={{p:2, mt:2}}>
-      <Typography variant='h6'>Metrics</Typography>
-      <div>
-        <Button variant='outlined' onClick={fetchMetrics}>Fetch metrics</Button>
-        <canvas ref={chartRef} width={800} height={160} />
+      <div style={{marginTop:16}}>
+        <CFormInput id="agentJarAttach" defaultValue='agent/target/agent-0.1.0-SNAPSHOT.jar' />
+        <div style={{marginTop:8}}><textarea id='log' style={{width:'100%',height:200}}></textarea></div>
       </div>
-    </Paper>
-
-    {selected && (<Paper sx={{p:2, mt:2}}>
-      <h3>Live controls for process {selected}</h3>
-      <div style={{display:'flex', gap:8, alignItems: 'center'}}>
-        <input id='jfrName' placeholder='JFR name' />
-        <input id='jfrMax' placeholder='Max age (ms)' />
-        <button onClick={()=>startJfr(selected)}>Start JFR</button>
-        <input id='jfrFile' placeholder='dump.jfr' defaultValue={'/tmp/jvmdoctor-'+selected+'.jfr'} />
-        <button onClick={()=>stopJfr(selected)}>Stop + Dump JFR</button>
-      </div>
-      <div style={{display:'flex', gap:8, marginTop:8, alignItems:'center'}}>
-        <input id='profDuration' placeholder='Duration (s)' defaultValue='10' />
-        <input id='profEvent' placeholder='Event' defaultValue='cpu' />
-        <input id='profOutput' placeholder='Output' defaultValue='svg' />
-        <input id='profFile' placeholder='file.svg' defaultValue={'/tmp/profile-'+selected+'.svg'} />
-        <button onClick={()=>runProfiler(selected)}>Run profiler</button>
-        <input id='nativePath' placeholder='native lib path (optional)' style={{width:240}} />
-        <button onClick={async ()=>{
-          const path = document.getElementById('nativePath').value
-          const resp = await fetch('/api/processes/'+selected+'/native/load', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path}) })
-          const data = await resp.json()
-          alert('Native load: ' + JSON.stringify(data))
-        }}>Load native</button>
-      </div>
-    </Paper>)}
-
-    <Paper sx={{p:2, mt:2}}>
-      <Typography variant='h6'>Log</Typography>
-      <div style={{display:'flex', gap:8, alignItems:'center', marginTop:8}}>
-        <TextField id='logFilter' placeholder='Filter (substring or regex)' />
-        <FormControlLabel control={<Checkbox id='regexToggle' />} label='Regex' />
-        <FormControlLabel control={<Checkbox id='caseToggle' defaultChecked />} label='Case sensitive' />
-        <Button onClick={() => fetchLogs(selected, document.getElementById('logFilter').value, document.getElementById('regexToggle').checked, !document.getElementById('caseToggle').checked)}>Apply</Button>
-        <Button onClick={() => fetchLogs(selected, '', false, true)}>Clear</Button>
-      </div>
-      <pre id='log' style={{height:200, overflow:'auto', background:'#eee', padding:12}}></pre>
-      {jfrPath && (<div style={{marginTop:8}}>JFR: <a href={'/api/files/download?path=' + encodeURIComponent(jfrPath)}>Download</a></div>)}
-      {profilePath && (<div style={{marginTop:8}}>Profile: <a href={'/api/files/download?path=' + encodeURIComponent(profilePath)}>Download</a>
-        {profilePath.endsWith('.svg') && (<div style={{marginTop:8}}><img src={'/api/files/download?path=' + encodeURIComponent(profilePath)} alt='profile' style={{width:'100%'}}/></div>)}
-      </div>)}
-    </Paper>
-  </Container>)
+    </CContainer>
+  )
 }
