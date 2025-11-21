@@ -1,0 +1,18 @@
+FROM openjdk:21-jdk-slim
+
+# Install necessary tools
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy agent JAR
+COPY agent/target/agent-0.1.0-SNAPSHOT.jar /app/agent.jar
+
+# Set working directory
+WORKDIR /app
+
+# Expose metrics port
+EXPOSE 9404
+
+# Run the agent
+CMD ["java", "-jar", "/app/agent.jar"]

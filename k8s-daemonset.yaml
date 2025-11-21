@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: jvmdoctor-agent
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: jvmdoctor-agent
+  template:
+    metadata:
+      labels:
+        app: jvmdoctor-agent
+    spec:
+      hostPID: true  # Allow access to host processes
+      containers:
+      - name: jvmdoctor-agent
+        image: your-registry/jvmdoctor-agent:latest  # Build and push agent image
+        ports:
+        - containerPort: 9404
+          hostPort: 9404
+        env:
+        - name: CENTRAL_BACKEND_URL
+          value: "http://jvmdoctor-backend:8080"  # Central backend service
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        securityContext:
+          privileged: true  # For attaching to processes
+        volumeMounts:
+        - name: host-proc
+          mountPath: /host/proc
+          readOnly: true
+        - name: host-root
+          mountPath: /host/root
+      volumes:
+      - name: host-proc
+        hostPath:
+          path: /proc
+      - name: host-root
+        hostPath:
+          path: /
