@@ -37,8 +37,8 @@ cd ui
 npm install
 npm run build
 Notes about the UI:
-- UI uses Material UI for layout and Chart.js for time series charts.
-- The log viewer now supports regex filters and case-insensitive searches. Use the Checkboxes in the UI to toggle regex and case sensitivity.
+- UI uses CoreUI React for layout and Chart.js for time series charts. CoreUI provides a flexible dashboard layout and theme-ready components. You can customize pages using CoreUI components: https://coreui.io/react/.
+-- The log viewer now supports regex filters and case-insensitive searches. Use the Checkboxes in the UI to toggle regex and case sensitivity.
  
 Front-end features
 - React UI uses Material-UI for layout and a responsive dashboard.
@@ -109,10 +109,13 @@ scrape_configs:
 2. Build a lightweight backend for log/trace correlation and long-term metric storage
 3. Provide a customizable dashboard and alerting presets
 4. Demo: Start a JAR from a UI and monitor it (see `backend/` module)
+5. K8s/Scale out: use `k8s-daemonset.yaml` and `Dockerfile.agent` to deploy the agent to each node. Agents can be configured with the `CENTRAL_BACKEND_URL` environment variable — the backend exposes `/api/metrics/push` to accept plain Prometheus metric text.
 
 ## Files to look at
 - `agent/src/main/java/com/jvmdoctor/Agent.java` — Java agent and sample collector
 - `sample-app/src/main/java/com/jvmdoctor/SampleApp.java` — tiny app to exercise the agent
+ - `Dockerfile.agent` — container recipe for the agent
+ - `k8s-daemonset.yaml` — example DaemonSet to run an agent on every node and push metrics to the central backend
 
 License: MIT
 # JVMDoctor
