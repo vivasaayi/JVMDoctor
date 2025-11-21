@@ -242,6 +242,14 @@ public class ProcessController {
         try {
             List<Map<String,Object>> rows = collectHeapHistogram(mp.pid, maxRows);
             return ResponseEntity.ok(Map.of("entries", rows));
+        } catch (com.sun.tools.attach.AttachNotSupportedException e) {
+            String msg = e.getMessage() == null ? "attach not supported" : e.getMessage();
+            String hint = "Attach not supported; run JVMDoctor as same user as target process, or use managed launch.";
+            return ResponseEntity.status(412).body(Map.of("error", msg, "hint", hint, "pid", mp.pid));
+        } catch (IllegalStateException e) {
+            String msg = e.getMessage();
+            String hint = "Target is not ready for attach; retry after it fully starts or use managed launch.";
+            return ResponseEntity.status(409).body(Map.of("error", msg, "hint", hint, "pid", mp.pid));
         } catch (Exception e) {
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }

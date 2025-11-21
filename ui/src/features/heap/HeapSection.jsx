@@ -222,8 +222,18 @@ function HeapHistogramPanel({ selectedProcess, notify }) {
       setRows(data.entries || [])
       setError(null)
     } catch (err) {
-      setError(err.message)
-      notify('warning', `Heap histogram failed: ${err.message}`)
+      // backend may return structured JSON with error/hint — try to parse it so UI shows helpful guidance
+      let message = err.message || String(err)
+      try {
+        const parsed = typeof message === 'string' ? JSON.parse(message) : message
+        if (parsed && parsed.error) {
+          message = parsed.error + (parsed.hint ? ` — ${parsed.hint}` : '')
+        }
+      } catch (e) {
+        // keep original message
+      }
+      setError(message)
+      notify('warning', `Heap histogram failed: ${message}`)
     } finally {
       setLoading(false)
     }
