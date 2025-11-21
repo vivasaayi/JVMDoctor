@@ -46,7 +46,18 @@ export default function App(){
     const agentJar = document.getElementById('agentJar').value
     const agentPort = parseInt(document.getElementById('agentPort').value)
     const args = document.getElementById('jvmArgs').value.split(/\s+/).filter(x=>x)
-    await fetch('/api/processes/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jarPath, agentJar, agentPort, args})})
+    const envVars = document.getElementById('envVars').value.split(/\s+/).filter(x=>x).map(s => {
+      const [k,v] = s.split('=')
+      return {key: k, value: v}
+    })
+    await fetch('/api/processes/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jarPath, agentJar, agentPort, args, envVars})})
+    refresh()
+  }
+
+  async function attachAgentToJvm(pid){
+    const agentJar = document.getElementById('agentJarAttach').value
+    await fetch('/api/processes/jvms/' + pid + '/attach', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({agentJar}) })
+    alert('Agent attached to JVM ' + pid)
     refresh()
   }
 
@@ -162,15 +173,16 @@ export default function App(){
             <CCol xs={4}><CFormInput id="agentJar" placeholder="Agent JAR" defaultValue='agent/target/agent-0.1.0-SNAPSHOT.jar' /></CCol>
             <CCol xs={6}><CFormInput id="agentPort" placeholder="Agent Port" defaultValue='9404'/></CCol>
             <CCol xs={6}><CFormInput id="jvmArgs" placeholder="JVM Args" defaultValue='-Xmx256m'/></CCol>
+            <CCol xs={12}><CFormInput id="envVars" placeholder="Env Vars (KEY=VALUE KEY2=VALUE2)" /></CCol>
             <CCol xs={12}><CButton color="primary" onClick={startJar}>Start JAR</CButton></CCol>
           </CRow>
         </CCardBody>
       </CCard>
 
       <CRow>
-        <CCol xs={3}>
+        <CCol xs={6}>
           <CCard>
-            <CCardHeader>Processes</CCardHeader>
+            <CCardHeader>Running Processes</CCardHeader>
             <CCardBody>
               <CListGroup>
                 {processes.map(p => (
@@ -183,6 +195,24 @@ export default function App(){
             </CCardBody>
           </CCard>
         </CCol>
+        <CCol xs={6}>
+          <CCard>
+            <CCardHeader>Local JVMs (Attach Agent)</CCardHeader>
+            <CCardBody>
+              <CListGroup>
+                {jvms.map(j => (
+                  <CListGroupItem key={j.id}>
+                    {j.displayName} <small className="text-muted">(pid:{j.id})</small>
+                    <CButton size='sm' color='primary' style={{float:'right'}} onClick={() => attachAgentToJvm(j.id)}>Attach Agent</CButton>
+                  </CListGroupItem>
+                ))}
+              </CListGroup>
+            </CCardBody>
+          </CCard>
+        </CCol>
+      </CRow>
+
+      <CRow>
         <CCol xs={9}>
           <CCard>
             <CCardHeader>Metrics</CCardHeader>
@@ -192,12 +222,16 @@ export default function App(){
             </CCardBody>
           </CCard>
         </CCol>
+        <CCol xs={3}>
+          <CCard>
+            <CCardHeader>Controls</CCardHeader>
+            <CCardBody>
+              <CFormInput id="agentJarAttach" defaultValue='agent/target/agent-0.1.0-SNAPSHOT.jar' placeholder="Agent JAR for attach" />
+              <div style={{marginTop:8}}><textarea id='log' style={{width:'100%',height:200}} placeholder="Logs will appear here"></textarea></div>
+            </CCardBody>
+          </CCard>
+        </CCol>
       </CRow>
-
-      <div style={{marginTop:16}}>
-        <CFormInput id="agentJarAttach" defaultValue='agent/target/agent-0.1.0-SNAPSHOT.jar' />
-        <div style={{marginTop:8}}><textarea id='log' style={{width:'100%',height:200}}></textarea></div>
-      </div>
     </CContainer>
   )
 }
