@@ -63,6 +63,13 @@ public class ProcessController {
             logger.warn("jarPath not provided in start request");
             return ResponseEntity.badRequest().body(Map.of("error", "jarPath is required"));
         }
+        Path jarFile = Paths.get(jarPath);
+        if (!Files.exists(jarFile)) {
+            logger.error("JAR file does not exist: {}", jarPath);
+            return ResponseEntity.badRequest().body(Map.of("error", "JAR file not found: " + jarPath));
+        }
+        jarPath = jarFile.toAbsolutePath().toString(); // Use absolute path
+        logger.info("Resolved JAR path to: {}", jarPath);
         logger.info("Starting process: jar={}, agentPort={}, agentJar={}, args={}, envVars={}", jarPath, agentPort, agentJar, args, envVars.keySet());
 
         try {

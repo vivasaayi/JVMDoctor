@@ -10,8 +10,8 @@ import {
 } from '@coreui/react'
 
 const defaultState = {
-  jarPath: 'sample-app/target/sample-app-0.1.0-SNAPSHOT-jar-with-dependencies.jar',
-  agentJar: 'agent/target/agent-0.1.0-SNAPSHOT.jar',
+  jarPath: '/Users/rajanpanneerselvam/JVMDoctor/sample-app/target/sample-app-0.1.0-SNAPSHOT-jar-with-dependencies.jar',
+  agentJar: '/Users/rajanpanneerselvam/JVMDoctor/agent/target/agent-0.1.0-SNAPSHOT.jar',
   agentPort: 9404,
   jvmArgs: '-Xmx256m',
   envVars: ''
