@@ -1,0 +1,44 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.jvmdoctor</groupId>
+        <artifactId>jvmdoctor-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>backend</artifactId>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+            <version>3.3.4</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+            <version>3.3.4</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>3.3.4</version>
+            </plugin>
+        </plugins>
+    </build>
+    <!-- Override compiler release for backend to avoid Spring ASM incompatibilities with Java 25 class files
+         Spring uses an older ASM that currently rejects Java 25 bytecode during component-scan. To run the backend
+         locally on a Java 25 JDK, compile the backend to a lower class file version (21) which Spring can parse.
+         This preserves runtime on JDK 25 while avoiding scan errors. -->
+    <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+    </properties>
+</project>
