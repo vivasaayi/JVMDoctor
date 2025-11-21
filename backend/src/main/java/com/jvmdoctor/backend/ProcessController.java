@@ -21,6 +21,12 @@ import javax.management.remote.JMXServiceURL;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
 
 @RestController
 @RequestMapping("/api/processes")
@@ -216,7 +222,12 @@ public class ProcessController {
             String returned = (String) mbsc.invoke(name, "takeHeapDump", new Object[]{target, Boolean.TRUE}, new String[]{"java.lang.String","boolean"});
             conn.close();
             vm.detach();
-            return ResponseEntity.ok(Map.of("path", returned));
+            Path path = Paths.get(returned);
+            if (Files.exists(path)) {
+                return ResponseEntity.ok(Map.of("status", "success", "path", returned));
+            } else {
+                return ResponseEntity.status(500).body(Map.of("status", "error", "message", "Heap dump file was not created"));
+            }
         } catch (com.sun.tools.attach.AttachNotSupportedException e) {
             // Attach is not supported for this pid — explain why and give guidance.
             String msg = e.getMessage() == null ? "attach not supported" : e.getMessage();
@@ -227,6 +238,22 @@ public class ProcessController {
             String msg = e.getMessage();
             String suggestion = "Attach handshake failed — the target JVM may be starting up or disallowing attach. Try again after the target process is fully started, or launch the process under JVMDoctor as a managed process so attach works.";
             return ResponseEntity.status(409).body(Map.of("error", msg, "hint", suggestion, "pid", mp.pid));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @GetMapping("/{id}/heap/download")
+    public ResponseEntity<?> downloadHeapDump(@PathVariable("id") long id, @RequestParam("path") String path) {
+        try {
+            Path filePath = Paths.get(path);
+            if (!Files.exists(filePath)) {
+                return ResponseEntity.notFound().build();
+            }
+            Resource resource = new FileSystemResource(filePath);
+            return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filePath.getFileName() + "\"")
+                .body(resource);
         } catch (Exception e) {
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }

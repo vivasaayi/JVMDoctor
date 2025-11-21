@@ -8,6 +8,8 @@ const palette = ['#321fdb']
 
 export default function OverviewPanel({ processesCount, selectedProcess, metricsSample }) {
   const [threadSeries, setThreadSeries] = useState([])
+  const [cpuSeries, setCpuSeries] = useState([])
+  const prevCpuTime = React.useRef(0)
 
   useEffect(() => {
     if (!metricsSample) {
@@ -24,6 +26,25 @@ export default function OverviewPanel({ processesCount, selectedProcess, metrics
       return
     }
     setThreadSeries((prev) => [...prev, { x: metricsSample.timestamp, y: value }].slice(-120))
+  }, [metricsSample])
+
+  useEffect(() => {
+    if (!metricsSample) {
+      setCpuSeries([])
+      return
+    }
+    if (!metricsSample.parsed) {
+      return
+    }
+    const value = firstMetricValue(metricsSample.parsed, 'process_cpu_seconds_total')
+    if (value === null || value === undefined) {
+      return
+    }
+    const delta = value - prevCpuTime.current
+    prevCpuTime.current = value
+    if (delta > 0) {
+      setCpuSeries((prev) => [...prev, { x: metricsSample.timestamp, y: delta }].slice(-120))
+    }
   }, [metricsSample])
 
   const liveThreads = useMemo(() => {
@@ -114,6 +135,31 @@ export default function OverviewPanel({ processesCount, selectedProcess, metrics
                       label: 'Live Threads',
                       data: threadSeries,
                       borderColor: palette[0],
+                      tension: 0.3,
+                      pointRadius: 0
+                    }
+                  ]}
+                  options={{ scales: { y: { beginAtZero: true } } }}
+                />
+              )}
+            </CCardBody>
+          </CCard>
+        </CCol>
+        <CCol lg={4}>
+          <CCard>
+            <CCardHeader>CPU Activity</CCardHeader>
+            <CCardBody>
+              {cpuSeries.length === 0 ? (
+                <CAlert color="light" className="mb-0">
+                  Waiting for metrics…
+                </CAlert>
+              ) : (
+                <TimeSeriesChart
+                  datasets={[
+                    {
+                      label: 'CPU Seconds Delta',
+                      data: cpuSeries,
+                      borderColor: '#f86c6b',
                       tension: 0.3,
                       pointRadius: 0
                     }

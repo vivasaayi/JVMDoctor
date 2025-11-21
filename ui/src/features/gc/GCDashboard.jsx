@@ -17,7 +17,7 @@ export default function GCDashboard({ metricsSample }) {
     if (!metricsSample.parsed) {
       return
     }
-    const entries = metricsSample.parsed['jvm_gc_collection_seconds_sum'] || []
+    const entries = metricsSample.parsed['jvm_gc_collection_seconds_count'] || []
     if (entries.length === 0) {
       return
     }
@@ -28,7 +28,7 @@ export default function GCDashboard({ metricsSample }) {
         const prevVal = prevTotals.current[key]
         const delta = prevVal != null ? Math.max(0, entry.value - prevVal) : 0
         prevTotals.current[key] = entry.value
-        const valueForChart = delta // show delta of seconds in the interval
+        const valueForChart = delta // show delta of cycles in the interval
         const existing = next[key] ? [...next[key]] : []
         existing.push({ x: metricsSample.timestamp, y: valueForChart })
         next[key] = existing.slice(-180)
@@ -67,7 +67,7 @@ export default function GCDashboard({ metricsSample }) {
 
   return (
     <CCard>
-      <CCardHeader>GC Metrics</CCardHeader>
+      <CCardHeader>GC Cycles</CCardHeader>
       <CCardBody>
         {datasets.length === 0 ? (
           <CAlert color="light">No GC metrics yet. Select a running process with the agent attached.</CAlert>

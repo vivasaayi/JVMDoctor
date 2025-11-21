@@ -158,8 +158,12 @@ function HeapDumpPanel({ selectedProcess, notify }) {
     setPending(true)
     try {
       const response = await requestHeapDump(selectedProcess.id, { filename })
-      setLastDump(response.path)
-      notify('success', `Heap dump created at ${response.path}`)
+      if (response.status === 'success') {
+        setLastDump(response.path)
+        notify('success', `Heap dump created at ${response.path}`)
+      } else {
+        notify('danger', `Heap dump failed: ${response.message}`)
+      }
     } catch (err) {
       // backend often returns JSON with error/hint fields — try to parse and show helpful hint
       let message = err.message || String(err)
@@ -193,7 +197,7 @@ function HeapDumpPanel({ selectedProcess, notify }) {
             </CButton>
             {lastDump && (
               <CAlert color="success" className="mt-3">
-                <a href={`/api/files/download?path=${encodeURIComponent(lastDump)}`} target="_blank" rel="noreferrer">
+                <a href={`/api/processes/${selectedProcess.id}/heap/download?path=${encodeURIComponent(lastDump)}`} target="_blank" rel="noreferrer">
                   Download last heap dump
                 </a>
               </CAlert>
